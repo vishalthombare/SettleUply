@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Request, Response, Depends
 from app.api.dependencies import DB, CurrentUser, trusted_origin
-from app.schemas.inputs import Register, Login, VerifyOTP, EmailInput, ResetPassword, ChangePassword
+from app.schemas.inputs import Register, Login, LoginChallenge, VerifyLoginOTP, VerifyOTP, EmailInput, ResetPassword, ChangePassword
 from app.services.auth import AuthService
 from app.models.enums import OTPPurpose
 from app.core.config import get_settings
@@ -33,10 +33,22 @@ async def resend(data: EmailInput, db: DB):
 
 
 @router.post('/login')
-async def login(data: Login, request: Request, response: Response, db: DB):
-    result, raw = await AuthService(db).login(data, request)
+async def login(data: Login, db: DB):
+    result = await AuthService(db).login(data)
+    return ok(result, message='Enter the sign-in code sent to your email')
+
+
+@router.post('/verify-login-otp')
+async def verify_login(data: VerifyLoginOTP, request: Request, response: Response, db: DB):
+    result, raw = await AuthService(db).verify_login(data, request)
     cookie(response, raw)
     return ok(result)
+
+
+@router.post('/resend-login-otp')
+async def resend_login(data: LoginChallenge, db: DB):
+    result = await AuthService(db).resend_login(data.challenge_token)
+    return ok(result, message='A new sign-in code has been sent')
 
 
 @router.post('/refresh', dependencies=[Depends(trusted_origin)])

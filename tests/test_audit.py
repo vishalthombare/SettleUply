@@ -1,5 +1,8 @@
 from datetime import date, timedelta, timezone
 from decimal import Decimal
+import re
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi import Request
@@ -17,6 +20,7 @@ from app.exceptions import AppError
 from app.main import app
 from app.models import Contact, User, UserSession, OTPVerification, GroupMember, ExpenseSplit
 from app.models.enums import Role, UserStatus, OTPPurpose
+from app.notifications.providers import Delivery
 from app.schemas.inputs import ContactInput, GroupInput, MemberInput, GroupExpenseInput, SplitInput, VerifyOTP, Login
 from app.services.auth import AuthService
 from app.services.catalogs import ContactService
@@ -165,7 +169,7 @@ async def test_password_and_otp_identity_are_recorded_only_after_verification(db
                            expires_at=utcnow() + timedelta(minutes=10)))
     await db.commit()
     set_request_audit(db, 'MOBILE')
-    service = AuthService(db)
+    service = AuthService(db, email=SimpleNamespace(send=AsyncMock(return_value=Delivery(status='SENT'))))
     with pytest.raises(AppError):
         await service.verify_registration(VerifyOTP(email=user.email, otp='999999'))
     otp = await db.scalar(select(OTPVerification).where(OTPVerification.user_id == user.id))
@@ -173,8 +177,13 @@ async def test_password_and_otp_identity_are_recorded_only_after_verification(db
     await service.verify_registration(VerifyOTP(email=user.email, otp='123456'))
     assert otp.updated_by == user.id
     set_request_audit(db, 'WEB')
-    from types import SimpleNamespace
-    await service.login(Login(email=user.email, password='Password123'), SimpleNamespace(client=None, headers={}))
+    challenge = await service.login(Login(email=user.email, password='Password123'))
+    assert await db.scalar(select(UserSession).where(UserSession.user_id == user.id)) is None
+    code = re.search(r'\b\d{6}\b', service.email.send.call_args.args[2]).group()
+    await service.verify_login(
+        SimpleNamespace(challenge_token=challenge['challenge_token'], otp=code),
+        SimpleNamespace(client=None, headers={}),
+    )
     session = await db.scalar(select(UserSession).where(UserSession.user_id == user.id))
     assert session.created_by == user.id and session.created_application_type == 'WEB'
     assert user.updated_by == user.id

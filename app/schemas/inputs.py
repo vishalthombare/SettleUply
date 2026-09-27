@@ -60,6 +60,14 @@ class Login(Input):
     password: str = Field(max_length=128)
 
 
+class LoginChallenge(Input):
+    challenge_token: str = Field(min_length=32, max_length=128, pattern=r'^[A-Za-z0-9_-]+$')
+
+
+class VerifyLoginOTP(LoginChallenge):
+    otp: str = Field(pattern=r'^\d{6}$')
+
+
 class EmailInput(Input):
     email: EmailStr
 

@@ -4,7 +4,7 @@ from app.db.session import SessionLocal
 from app.db.base import utcnow
 from app.models import NotificationLog, UserSettings, Contact, User, GroupMember, Group
 from app.models.enums import Channel, NotificationStatus, UserStatus
-from app.notifications.providers import NoopProvider
+from app.notifications.providers import NoopProvider, get_email_service
 
 logger = logging.getLogger(__name__)
 
@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 class NotificationService:
     def __init__(self, db, email=None, sms=None):
         self.db = db
-        self.email = email or NoopProvider()
+        self.email = email if email is not None else get_email_service()
         self.sms = sms or NoopProvider()
 
     async def deliver(self, user_id, channel, recipient, kind, message, **references):

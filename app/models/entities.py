@@ -62,6 +62,7 @@ class OTPVerification(IdentityMixin, AuditMixin, Base):
     email: Mapped[str] = mapped_column(String(254), index=True)
     purpose: Mapped[OTPPurpose] = mapped_column(enum_type(OTPPurpose))
     otp_hash: Mapped[str] = mapped_column(String(64))
+    challenge_hash: Mapped[Optional[str]] = mapped_column(String(64), unique=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     attempt_count: Mapped[int] = mapped_column(default=0)
     verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))

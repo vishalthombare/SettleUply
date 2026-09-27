@@ -31,6 +31,7 @@ class OTPPurpose(str, Enum):
     REGISTRATION = 'REGISTRATION'
     PASSWORD_RESET = 'PASSWORD_RESET'
     EMAIL_CHANGE = 'EMAIL_CHANGE'
+    LOGIN = 'LOGIN'
 
 class ReminderType(str, Enum):
     DUE_SOON = 'DUE_SOON'

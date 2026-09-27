@@ -10,16 +10,17 @@ from app.db.audit import set_audit_actor
 from app.models import User, UserSettings, UserSession, OTPVerification
 from app.models.enums import UserStatus, OTPPurpose
 from app.exceptions import AppError
-from app.notifications.providers import NoopProvider
+from app.notifications.providers import Delivery, EmailService, get_email_service
 
 logger = logging.getLogger(__name__)
 DUMMY_HASH = hash_password(secrets.token_urlsafe(32))
 
 
 class AuthService:
-    def __init__(self, db):
+    def __init__(self, db, email: EmailService | None = None):
         self.db = db
         self.config = get_settings()
+        self.email = email if email is not None else get_email_service(self.config)
 
     async def find_user(self, email, lock=False):
         query = select(User).where(User.email == str(email).lower())
@@ -33,16 +34,44 @@ class AuthService:
             raise AppError(429, 'Please wait one minute before requesting another code')
         await self.db.execute(update(OTPVerification).where(OTPVerification.user_id == user.id, OTPVerification.purpose == purpose, OTPVerification.verified_at.is_(None)).values(verified_at=utcnow()))
         code = f'{secrets.randbelow(1000000):06d}'
-        print('---------',code,'---------')
-        self.db.add(OTPVerification(user_id=user.id, email=user.email, purpose=purpose, otp_hash=otp_hash(user.email, purpose.value, code), expires_at=utcnow() + timedelta(minutes=self.config.otp_expire_minutes)))
+        challenge = secrets.token_urlsafe(32) if purpose == OTPPurpose.LOGIN else None
+        expires_at = utcnow() + timedelta(minutes=self.config.otp_expire_minutes)
+        self.db.add(OTPVerification(
+            user_id=user.id, email=user.email, purpose=purpose,
+            otp_hash=otp_hash(user.email, purpose.value, code),
+            challenge_hash=token_hash(challenge) if challenge else None,
+            expires_at=expires_at,
+        ))
         await self.db.commit()
         # OTP is never persisted in logs or returned by the API. Explicit local debug only.
-        if self.config.app_env == 'development' and self.config.dev_show_otp:
+        local_debug = self.config.app_env == 'development' and self.config.dev_show_otp
+        if local_debug:
             logger.warning('LOCAL DEVELOPMENT OTP for %s (%s): %s', user.email, purpose.value, code)
+        action, subject = {
+            OTPPurpose.LOGIN: ('sign in to your account', 'Your SettleUply sign-in code'),
+            OTPPurpose.PASSWORD_RESET: ('reset your password', 'Reset your SettleUply password'),
+        }.get(purpose, ('verify your email', 'Verify your SettleUply email'))
+        message = (
+            f'Your SettleUply code is: {code}\n\n'
+            f'Use this code to {action}. It expires in {self.config.otp_expire_minutes} minutes.\n\n'
+            "If you didn't request this code, you can ignore this email."
+        )
         try:
-            await NoopProvider().send(user.email, 'SettleUply verification code', f'Your code is {code}')
+            delivery = await self.email.send(user.email, subject, message)
         except Exception:
-            logger.exception('OTP delivery failed')
+            # Provider exceptions may contain request bodies, so do not log them verbatim.
+            delivery = Delivery(status='FAILED', error='Email provider raised an unexpected error')
+        if delivery.status != 'SENT' and not (delivery.status == 'SKIPPED' and local_debug):
+            logger.error('OTP email delivery failed: %s', delivery.error)
+            if purpose == OTPPurpose.LOGIN:
+                raise AppError(503, 'We could not send the sign-in code. Wait one minute, then sign in again.')
+            raise AppError(503, "We couldn't send the email code. Wait one minute, then request a new code.")
+        if challenge:
+            return {
+                'challenge_token': challenge,
+                'expires_in': max(0, int((expires_at - utcnow()).total_seconds())),
+                'resend_after': 60,
+            }
 
     async def register(self, data):
         existing = await self.find_user(data.email)
@@ -75,6 +104,8 @@ class AuthService:
         await self.db.commit()
 
     async def resend(self, email, purpose):
+        if purpose == OTPPurpose.LOGIN:
+            raise AppError(400, 'Start sign-in with your email and password')
         user = await self.find_user(email)
         if user and (purpose != OTPPurpose.REGISTRATION or user.status == UserStatus.PENDING_VERIFICATION):
             await self.issue_otp(user, purpose)
@@ -86,19 +117,58 @@ class AuthService:
         await self.db.flush()
         return {'access_token': access_token(user.id, session.id), 'token_type': 'bearer', 'user': user}, raw
 
-    async def login(self, data, request):
+    @staticmethod
+    def require_active_login(user):
+        if user.status != UserStatus.ACTIVE:
+            messages = {UserStatus.PENDING_APPROVAL: 'Your account is awaiting administrator approval.', UserStatus.SUSPENDED: 'Your account has been suspended.', UserStatus.PENDING_VERIFICATION: 'Please verify your email before signing in.'}
+            raise AppError(403, messages.get(user.status, 'Your account is not active.'))
+        if not user.email_verified:
+            raise AppError(403, 'Please verify your email before signing in.')
+
+    async def login(self, data, request=None):
         user = await self.find_user(data.email, lock=True)
         valid = verify_password(data.password, user.password_hash if user else DUMMY_HASH)
         if not user or not valid:
             raise AppError(401, 'Invalid email or password')
-        if user.status != UserStatus.ACTIVE:
-            messages = {UserStatus.PENDING_APPROVAL: 'Your account is awaiting administrator approval.', UserStatus.SUSPENDED: 'Your account has been suspended.', UserStatus.PENDING_VERIFICATION: 'Please verify your email before signing in.'}
-            raise AppError(403, messages.get(user.status, 'Your account is not active.'))
+        self.require_active_login(user)
         set_audit_actor(self.db, user.id)
+        return await self.issue_otp(user, OTPPurpose.LOGIN)
+
+    async def login_challenge(self, challenge_token):
+        candidate = await self.db.scalar(select(OTPVerification).where(
+            OTPVerification.challenge_hash == token_hash(challenge_token),
+            OTPVerification.purpose == OTPPurpose.LOGIN,
+        ))
+        if candidate is None:
+            raise AppError(400, 'Invalid or expired sign-in attempt. Sign in again.')
+        # Always lock the user before the OTP, matching password/admin/session operations.
+        user = await self.db.scalar(select(User).where(User.id == candidate.user_id)
+                                    .with_for_update().execution_options(populate_existing=True))
+        row = await self.db.scalar(select(OTPVerification).where(OTPVerification.id == candidate.id)
+                                   .with_for_update().execution_options(populate_existing=True))
+        if (user is None or row is None or row.verified_at is not None
+                or aware(row.expires_at) <= utcnow() or row.attempt_count >= 5):
+            raise AppError(400, 'Invalid or expired sign-in attempt. Sign in again.')
+        self.require_active_login(user)
+        return user, row
+
+    async def verify_login(self, data, request):
+        user, row = await self.login_challenge(data.challenge_token)
+        row.attempt_count += 1
+        if not hmac.compare_digest(row.otp_hash, otp_hash(row.email, OTPPurpose.LOGIN.value, data.otp)):
+            await self.db.commit()
+            raise AppError(400, 'Invalid or expired sign-in code')
+        set_audit_actor(self.db, user.id)
+        row.verified_at = utcnow()
         user.last_login_at = utcnow()
         result = await self.new_session(user, request)
         await self.db.commit()
         return result
+
+    async def resend_login(self, challenge_token):
+        user, _ = await self.login_challenge(challenge_token)
+        set_audit_actor(self.db, user.id)
+        return await self.issue_otp(user, OTPPurpose.LOGIN)
 
     async def refresh(self, raw, request):
         if not raw:
@@ -123,6 +193,11 @@ class AuthService:
 
     async def revoke_all(self, user_id):
         await self.db.execute(update(UserSession).where(UserSession.user_id == user_id, UserSession.revoked_at.is_(None)).values(revoked_at=utcnow()))
+        await self.db.execute(update(OTPVerification).where(
+            OTPVerification.user_id == user_id,
+            OTPVerification.purpose == OTPPurpose.LOGIN,
+            OTPVerification.verified_at.is_(None),
+        ).values(verified_at=utcnow()))
 
     async def logout(self, raw):
         if raw:

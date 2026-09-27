@@ -3,7 +3,7 @@ from decimal import Decimal
 from enum import Enum
 from sqlalchemy import inspect
 
-SENSITIVE = {'password_hash', 'refresh_token_hash', 'otp_hash'}
+SENSITIVE = {'password_hash', 'refresh_token_hash', 'otp_hash', 'challenge_hash'}
 
 
 def serialize(value):
