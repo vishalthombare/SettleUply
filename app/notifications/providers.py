@@ -12,7 +12,7 @@ class Delivery:
 
 
 class EmailService(Protocol):
-    async def send(self, recipient: str, subject: str, message: str) -> Delivery: ...
+    async def send(self, recipient: str, subject: str, message: str, *, html: str | None = None) -> Delivery: ...
 
 
 class SMSService(Protocol):
@@ -20,7 +20,7 @@ class SMSService(Protocol):
 
 
 class NoopProvider:
-    async def send(self, recipient: str, subject: str, message: str) -> Delivery:
+    async def send(self, recipient: str, subject: str, message: str, *, html: str | None = None) -> Delivery:
         return Delivery()
 
 
@@ -30,9 +30,17 @@ class ResendEmailProvider:
         self.sender = sender.strip()
         self.transport = transport
 
-    async def send(self, recipient: str, subject: str, message: str) -> Delivery:
+    async def send(self, recipient: str, subject: str, message: str, *, html: str | None = None) -> Delivery:
         if not recipient.strip():
             return Delivery(status='FAILED', error='Email recipient is missing')
+        payload = {
+            'from': self.sender,
+            'to': [recipient],
+            'subject': subject,
+            'text': message,
+        }
+        if html is not None:
+            payload['html'] = html
         try:
             async with httpx.AsyncClient(
                 timeout=httpx.Timeout(15, connect=5), transport=self.transport,
@@ -40,12 +48,7 @@ class ResendEmailProvider:
                 response = await client.post(
                     'https://api.resend.com/emails',
                     headers={'Authorization': f'Bearer {self.api_key}'},
-                    json={
-                        'from': self.sender,
-                        'to': [recipient],
-                        'subject': subject,
-                        'text': message,
-                    },
+                    json=payload,
                 )
         except httpx.RequestError:
             return Delivery(status='FAILED', error='Unable to connect to Resend; check network access and retry')

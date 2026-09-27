@@ -1,6 +1,8 @@
 import json
 import re
 from datetime import timedelta
+from html import escape
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -14,7 +16,7 @@ from app.exceptions import AppError
 from app.main import app
 from app.models import NotificationLog, OTPVerification, User, UserSession, UserSettings
 from app.models.enums import OTPPurpose, UserStatus
-from app.notifications.providers import NoopProvider, ResendEmailProvider, get_email_service
+from app.notifications.providers import Delivery, NoopProvider, ResendEmailProvider, get_email_service
 from app.services.auth import AuthService
 from app.services.notifications import NotificationService
 
@@ -25,18 +27,22 @@ def resend_provider(handler):
     )
 
 
-async def test_resend_request_and_acceptance():
+@pytest.mark.parametrize('html', [None, '<p>Your code is <strong>123456</strong></p>'])
+async def test_resend_request_and_acceptance(html):
     def handler(request):
         assert request.url == 'https://api.resend.com/emails'
         assert request.method == 'POST'
         assert request.headers['Authorization'] == 'Bearer re_test_key'
-        assert json.loads(request.content) == {
+        expected = {
             'from': 'SettleUply <otp@example.com>', 'to': ['member@example.com'],
             'subject': 'Verification', 'text': 'Your code is 123456',
         }
+        if html is not None:
+            expected['html'] = html
+        assert json.loads(request.content) == expected
         return httpx.Response(200, json={'id': 'resend-message-id'})
 
-    delivery = await resend_provider(handler).send('member@example.com', 'Verification', 'Your code is 123456')
+    delivery = await resend_provider(handler).send('member@example.com', 'Verification', 'Your code is 123456', html=html)
     assert delivery.status == 'SENT'
     assert delivery.provider_message_id == 'resend-message-id'
     assert delivery.error is None
@@ -152,6 +158,7 @@ async def test_registration_resend_and_password_reset_use_email_without_exposing
             challenge = login.json()['data']
             assert 'access_token' not in challenge
             assert len(messages) == 4
+            assert challenge['challenge_token'] not in messages[3]['html']
             assert await db.scalar(select(func.count()).select_from(UserSession).where(UserSession.user_id == user.id)) == 0
             code = re.search(r'\b\d{6}\b', messages[3]['text']).group()
             verified_login = await client.post('/api/v1/auth/verify-login-otp', json={
@@ -164,6 +171,10 @@ async def test_registration_resend_and_password_reset_use_email_without_exposing
             output = capsys.readouterr()
             for message in messages:
                 secret = re.search(r'\b\d{6}\b', message['text']).group()
+                assert secret in message['html']
+                assert secret not in message['subject']
+                assert 'Email user' in message['html']
+                assert f'{get_settings().otp_expire_minutes} minutes' in message['html']
                 assert secret not in output.out + output.err + caplog.text
     finally:
         app.dependency_overrides.clear()
@@ -207,12 +218,43 @@ async def test_noop_otp_delivery_requires_explicit_local_debug(db, monkeypatch, 
     assert 'LOCAL DEVELOPMENT OTP' in caplog.text
 
 
-async def test_notifications_use_configured_email_provider_and_keep_receipt(db, monkeypatch):
-    provider = resend_provider(lambda request: httpx.Response(200, json={'id': 'notification-email'}))
+@pytest.mark.parametrize('kind', ['TRANSACTION', 'SETTLEMENT', 'GROUP', 'REMINDER'])
+async def test_notifications_use_configured_email_provider_and_keep_receipt(db, monkeypatch, kind):
+    messages = []
+
+    def handler(request):
+        messages.append(json.loads(request.content))
+        return httpx.Response(200, json={'id': 'notification-email'})
+
+    provider = resend_provider(handler)
     monkeypatch.setattr('app.services.notifications.get_email_service', lambda: provider)
-    await NotificationService(db).deliver(1, 'EMAIL', 'alice@example.com', 'TRANSACTION', 'A record was updated.')
+    message = 'A record from <strong>Alice & Bob</strong> was updated.'
+    await NotificationService(db).deliver(1, 'EMAIL', 'alice@example.com', kind, message)
+    assert len(messages) == 1
+    assert message in messages[0]['text']
+    assert escape(message) in messages[0]['html']
+    assert '<strong>Alice & Bob</strong>' not in messages[0]['html']
     log = await db.scalar(select(NotificationLog))
+    assert log.message == message
+    assert log.subject == messages[0]['subject']
     assert log.status.value == 'SENT'
     assert log.provider_message_id == 'notification-email'
     assert log.sent_at is not None
     assert log.error_message is None
+
+
+async def test_sms_delivery_keeps_plain_text_without_html(db):
+    messages = []
+
+    async def send(recipient, subject, message):
+        messages.append((recipient, subject, message))
+        return Delivery(status='SENT', provider_message_id='sms-message', error=None)
+
+    message = 'A financial record has been updated.'
+    await NotificationService(db, sms=SimpleNamespace(send=send)).deliver(
+        1, 'SMS', '+15550123456', 'TRANSACTION', message,
+    )
+    assert messages == [('+15550123456', 'SettleUply update', message)]
+    log = await db.scalar(select(NotificationLog))
+    assert log.message == message
+    assert log.status.value == 'SENT'

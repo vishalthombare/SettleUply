@@ -11,6 +11,7 @@ from app.models import User, UserSettings, UserSession, OTPVerification
 from app.models.enums import UserStatus, OTPPurpose
 from app.exceptions import AppError
 from app.notifications.providers import Delivery, EmailService, get_email_service
+from app.notifications.templates import otp_email
 
 logger = logging.getLogger(__name__)
 DUMMY_HASH = hash_password(secrets.token_urlsafe(32))
@@ -47,17 +48,12 @@ class AuthService:
         local_debug = self.config.app_env == 'development' and self.config.dev_show_otp
         if local_debug:
             logger.warning('LOCAL DEVELOPMENT OTP for %s (%s): %s', user.email, purpose.value, code)
-        action, subject = {
-            OTPPurpose.LOGIN: ('sign in to your account', 'Your SettleUply sign-in code'),
-            OTPPurpose.PASSWORD_RESET: ('reset your password', 'Reset your SettleUply password'),
-        }.get(purpose, ('verify your email', 'Verify your SettleUply email'))
-        message = (
-            f'Your SettleUply code is: {code}\n\n'
-            f'Use this code to {action}. It expires in {self.config.otp_expire_minutes} minutes.\n\n'
-            "If you didn't request this code, you can ignore this email."
+        email = otp_email(
+            name=user.name, code=code, purpose=purpose,
+            expires_minutes=self.config.otp_expire_minutes,
         )
         try:
-            delivery = await self.email.send(user.email, subject, message)
+            delivery = await self.email.send(user.email, email.subject, email.text, html=email.html)
         except Exception:
             # Provider exceptions may contain request bodies, so do not log them verbatim.
             delivery = Delivery(status='FAILED', error='Email provider raised an unexpected error')

@@ -5,6 +5,7 @@ from app.db.base import utcnow
 from app.models import NotificationLog, UserSettings, Contact, User, GroupMember, Group
 from app.models.enums import Channel, NotificationStatus, UserStatus
 from app.notifications.providers import NoopProvider, get_email_service
+from app.notifications.templates import notification_email
 
 logger = logging.getLogger(__name__)
 
@@ -16,11 +17,17 @@ class NotificationService:
         self.sms = sms or NoopProvider()
 
     async def deliver(self, user_id, channel, recipient, kind, message, **references):
-        log = NotificationLog(user_id=user_id, channel=Channel(channel), recipient=recipient or '', notification_type=kind, subject='SettleUply update', message=message, **references)
+        channel = Channel(channel)
+        email = notification_email(kind=kind, message=message) if channel == Channel.EMAIL else None
+        subject = email.subject if email else 'SettleUply update'
+        log = NotificationLog(user_id=user_id, channel=channel, recipient=recipient or '', notification_type=kind, subject=subject, message=message, **references)
         self.db.add(log)
         await self.db.commit()
         try:
-            result = await (self.email if channel == 'EMAIL' else self.sms).send(recipient or '', log.subject, message)
+            if email:
+                result = await self.email.send(recipient or '', email.subject, email.text, html=email.html)
+            else:
+                result = await self.sms.send(recipient or '', subject, message)
             log.status = NotificationStatus(result.status)
             log.provider_message_id = result.provider_message_id
             log.error_message = result.error

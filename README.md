@@ -25,3 +25,7 @@ python -m app.cli.run_reminders
 ```
 
 The final three commands require a configured, migrated database. Tests use SQLite in memory and require no external services. Never enable DEV_SHOW_OTP outside local development.
+
+Email layout and copy live in [app/notifications/templates.py](app/notifications/templates.py). Registration, sign-in, and password-reset codes use a shared branded HTML layout with a plain-text alternative, personalized greeting, and the configured OTP expiry. Transaction, settlement, group, and reminder emails use the same layout with their own headings. Resend receives both `html` and `text` through its [send-email API](https://resend.com/docs/api-reference/emails/send-email). Template changes require no database migration or additional environment settings.
+
+Run `python -m pytest -q` to check template escaping and delivery payloads using mocked email transport; the tests do not send real email.
