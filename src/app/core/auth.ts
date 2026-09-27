@@ -11,6 +11,12 @@ interface Tokens {
   user: User;
 }
 
+export interface LoginChallenge {
+  challenge_token: string;
+  expires_in: number;
+  resend_after: number;
+}
+
 export const ACCESS_TOKEN_KEY = 'settleuply_access_token';
 
 @Injectable({ providedIn: 'root' })
@@ -23,6 +29,7 @@ export class Auth {
   homeUrl = computed(() => (this.isAdmin() ? '/admin' : '/dashboard'));
   private refreshing: Promise<boolean> | null = null;
   private sessionVersion = 0;
+  private pendingLoginToken: string | null = null;
 
   hasSavedSession(): boolean {
     try {
@@ -44,14 +51,54 @@ export class Auth {
     this.token.set(data.access_token);
     this.user.set(data.user);
   }
-  async login(body: unknown) {
+  async login(body: { email: string; password: string }): Promise<LoginChallenge> {
+    this.clear();
+    const version = this.sessionVersion;
     const result = await firstValueFrom(
-      this.http.post<Envelope<Tokens>>(environment.API_BASE_URL + '/auth/login', body, {
+      this.http.post<Envelope<LoginChallenge>>(environment.API_BASE_URL + '/auth/login', body, {
         withCredentials: true,
       }),
     );
+    if (version !== this.sessionVersion) throw new Error('This sign-in attempt was canceled.');
+    this.pendingLoginToken = result.data.challenge_token;
+    return result.data;
+  }
+  async verifyLogin(body: { challenge_token: string; otp: string }): Promise<void> {
+    this.requireLoginChallenge(body.challenge_token);
+    const version = this.sessionVersion;
+    const result = await firstValueFrom(
+      this.http.post<Envelope<Tokens>>(environment.API_BASE_URL + '/auth/verify-login-otp', body, {
+        withCredentials: true,
+      }),
+    );
+    if (version !== this.sessionVersion) throw new Error('This sign-in attempt was canceled.');
+    this.requireLoginChallenge(body.challenge_token);
+    this.pendingLoginToken = null;
     this.sessionVersion++;
     this.accept(result.data);
+  }
+  async resendLogin(challengeToken: string): Promise<LoginChallenge> {
+    this.requireLoginChallenge(challengeToken);
+    const version = this.sessionVersion;
+    const result = await firstValueFrom(
+      this.http.post<Envelope<LoginChallenge>>(
+        environment.API_BASE_URL + '/auth/resend-login-otp',
+        { challenge_token: challengeToken },
+      ),
+    );
+    if (version !== this.sessionVersion) throw new Error('This sign-in attempt was canceled.');
+    this.requireLoginChallenge(challengeToken);
+    this.pendingLoginToken = result.data.challenge_token;
+    return result.data;
+  }
+  cancelLogin() {
+    this.sessionVersion++;
+    this.pendingLoginToken = null;
+  }
+  private requireLoginChallenge(challengeToken: string) {
+    if (!challengeToken || this.pendingLoginToken !== challengeToken) {
+      throw new Error('Start again with your email and password to request a sign-in code.');
+    }
   }
   restore(): Promise<boolean> {
     return this.refresh();
@@ -87,7 +134,7 @@ export class Auth {
     return this.refreshing;
   }
   clear() {
-    this.sessionVersion++;
+    this.cancelLogin();
     try {
       localStorage.removeItem(ACCESS_TOKEN_KEY);
     } catch {
@@ -119,6 +166,8 @@ export const authInterceptor: HttpInterceptorFn = (request, next) => {
   const path = request.url.slice(environment.API_BASE_URL.length).split('?')[0];
   const publicAuthPaths = [
     '/auth/login',
+    '/auth/verify-login-otp',
+    '/auth/resend-login-otp',
     '/auth/register',
     '/auth/verify-otp',
     '/auth/resend-otp',

@@ -1,12 +1,14 @@
-import { Component, inject, signal } from '@angular/core';
+import { Component, inject, OnDestroy, signal } from '@angular/core';
+import { HttpErrorResponse } from '@angular/common/http';
 import { FormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { Api, errorMessage, Toast } from '../core/api';
-import { Auth } from '../core/auth';
+import { Auth, LoginChallenge } from '../core/auth';
+import { PasswordFieldComponent } from '../shared/password-field';
 
 @Component({
   standalone: true,
-  imports: [ReactiveFormsModule, RouterLink],
+  imports: [ReactiveFormsModule, RouterLink, PasswordFieldComponent],
   template: ` <div class="auth-page">
     <aside class="auth-story">
       <a class="brand" routerLink="/"><img src="/icon.svg" alt="" />SettleUply</a>
@@ -44,15 +46,17 @@ import { Auth } from '../core/auth';
             @if (mode === 'register') {
               <label>Full name<input formControlName="name" autocomplete="name" required /></label>
             }
-            <label
-              >Email address<input
-                type="email"
-                formControlName="email"
-                autocomplete="email"
-                required
-                placeholder="you@example.com"
-            /></label>
-            @if (mode === 'verify' || mode === 'reset') {
+            @if (!loginChallenge()) {
+              <label
+                >Email address<input
+                  type="email"
+                  formControlName="email"
+                  autocomplete="email"
+                  required
+                  placeholder="you@example.com"
+              /></label>
+            }
+            @if (mode === 'verify' || mode === 'reset' || loginChallenge()) {
               <label
                 >Verification code<input
                   formControlName="otp"
@@ -62,15 +66,15 @@ import { Auth } from '../core/auth';
                   placeholder="6-digit code"
               /></label>
             }
-            @if (mode === 'login' || mode === 'register' || mode === 'reset') {
-              <label
-                >{{ mode === 'reset' ? 'New password' : 'Password'
-                }}<input
-                  type="password"
-                  formControlName="password"
-                  [autocomplete]="mode === 'login' ? 'current-password' : 'new-password'"
-                  required
-              /></label>
+            @if (
+              (mode === 'login' && !loginChallenge()) || mode === 'register' || mode === 'reset'
+            ) {
+              <app-password-field
+                inputId="auth-password"
+                [label]="mode === 'reset' ? 'New password' : 'Password'"
+                [control]="form.controls.password"
+                [autocomplete]="mode === 'login' ? 'current-password' : 'new-password'"
+              />
               @if (mode !== 'login') {
                 <small class="muted">10+ characters, uppercase, lowercase and a number.</small>
               }
@@ -90,7 +94,21 @@ import { Auth } from '../core/auth';
               {{ busy() ? 'Please wait…' : button() }} <span>→</span>
             </button>
           </form>
-          @if (mode === 'login') {
+          @if (loginChallenge()) {
+            <div class="auth-links">
+              <button type="button" class="text-button" (click)="backToLogin()">
+                Change email or password
+              </button>
+              <button
+                type="button"
+                class="text-button"
+                [disabled]="busy() || resendSeconds() > 0"
+                (click)="resendLogin()"
+              >
+                {{ resendSeconds() > 0 ? 'Resend in ' + resendSeconds() + 's' : 'Send a new code' }}
+              </button>
+            </div>
+          } @else if (mode === 'login') {
             <div class="auth-links">
               <a routerLink="/auth/forgot">Forgot password?</a
               ><a routerLink="/auth/verify">Verify email</a>
@@ -116,7 +134,7 @@ import { Auth } from '../core/auth';
     </main>
   </div>`,
 })
-export class AuthPage {
+export class AuthPage implements OnDestroy {
   private route = inject(ActivatedRoute);
   private router = inject(Router);
   private api = inject(Api);
@@ -126,6 +144,10 @@ export class AuthPage {
   mode = this.route.snapshot.data['mode'] as string;
   busy = signal(false);
   error = signal('');
+  loginChallenge = signal<LoginChallenge | null>(null);
+  resendSeconds = signal(0);
+  private requestVersion = 0;
+  private resendTimer: ReturnType<typeof setInterval> | null = null;
   form = this.fb.nonNullable.group({
     name: [''],
     email: [
@@ -178,6 +200,7 @@ export class AuthPage {
     return 'Please check the submitted fields.';
   }
   title() {
+    if (this.loginChallenge()) return 'Check your inbox.';
     return (
       {
         login: 'Welcome back.',
@@ -189,9 +212,12 @@ export class AuthPage {
     )[this.mode];
   }
   subtitle() {
+    if (this.loginChallenge()) {
+      return `Enter the six-digit sign-in code sent to ${this.form.controls.email.value}.`;
+    }
     return (
       {
-        login: 'Sign in to see where things stand.',
+        login: 'Enter your email and password. We’ll email you a code to finish signing in.',
         register: 'Create your account. Verify your email. Get approved.',
         verify: 'Enter the six-digit code sent to your email.',
         forgot: 'We’ll send a code to reset your password.',
@@ -200,9 +226,10 @@ export class AuthPage {
     )[this.mode];
   }
   button() {
+    if (this.loginChallenge()) return 'Verify and sign in';
     return (
       {
-        login: 'Sign in',
+        login: 'Send sign-in code',
         register: 'Create account',
         verify: 'Verify email',
         forgot: 'Send reset code',
@@ -219,10 +246,31 @@ export class AuthPage {
     }
     this.busy.set(true);
     this.error.set('');
+    const version = this.requestVersion;
     const v = this.form.getRawValue();
     try {
       if (this.mode === 'login') {
-        await this.auth.login({ email: v.email, password: v.password });
+        const challenge = this.loginChallenge();
+        if (!challenge) {
+          const next = await this.auth.login({ email: v.email, password: v.password });
+          if (version !== this.requestVersion) return;
+          // Keep the challenge only in memory and discard the password after the first step.
+          this.form.controls.password.clearValidators();
+          this.form.controls.password.reset('');
+          this.form.controls.otp.setValidators([
+            Validators.required,
+            Validators.pattern(/^\d{6}$/),
+          ]);
+          this.form.controls.otp.reset('');
+          this.form.markAsUntouched();
+          this.loginChallenge.set(next);
+          this.startResendCountdown(next.resend_after);
+          return;
+        }
+        await this.auth.verifyLogin({ challenge_token: challenge.challenge_token, otp: v.otp });
+        if (version !== this.requestVersion) return;
+        this.loginChallenge.set(null);
+        this.stopResendCountdown();
         const target = this.route.snapshot.queryParamMap.get('returnUrl');
         await this.router.navigateByUrl(
           this.auth.isAdmin()
@@ -255,10 +303,73 @@ export class AuthPage {
         await this.router.navigateByUrl('/auth/login');
       }
     } catch (error) {
-      this.error.set(errorMessage(error));
+      if (version === this.requestVersion) this.error.set(errorMessage(error));
     } finally {
-      this.busy.set(false);
+      if (version === this.requestVersion) this.busy.set(false);
     }
+  }
+  backToLogin() {
+    this.requestVersion++;
+    this.auth.cancelLogin();
+    this.loginChallenge.set(null);
+    this.stopResendCountdown();
+    this.error.set('');
+    this.busy.set(false);
+    this.form.controls.otp.clearValidators();
+    this.form.controls.otp.reset('');
+    this.form.controls.password.setValidators([
+      Validators.required,
+      Validators.pattern(/\S/),
+      Validators.maxLength(128),
+    ]);
+    this.form.controls.password.reset('');
+    this.form.markAsUntouched();
+  }
+  async resendLogin() {
+    const challenge = this.loginChallenge();
+    if (!challenge || this.busy() || this.resendSeconds() > 0) return;
+    const version = this.requestVersion;
+    this.busy.set(true);
+    this.error.set('');
+    try {
+      const next = await this.auth.resendLogin(challenge.challenge_token);
+      if (version !== this.requestVersion) return;
+      this.loginChallenge.set(next);
+      this.form.controls.otp.reset('');
+      this.startResendCountdown(next.resend_after);
+      this.toast.show('A new sign-in code was sent. Use the latest code in your inbox.');
+    } catch (error) {
+      if (version === this.requestVersion) {
+        // A failed delivery can invalidate the old challenge on the server.
+        if (error instanceof HttpErrorResponse && error.status === 503) this.backToLogin();
+        this.error.set(errorMessage(error));
+      }
+    } finally {
+      if (version === this.requestVersion) this.busy.set(false);
+    }
+  }
+  private startResendCountdown(seconds: number) {
+    this.stopResendCountdown();
+    const deadline = Date.now() + seconds * 1000;
+    this.resendSeconds.set(Math.max(0, Math.ceil(seconds)));
+    if (seconds <= 0) return;
+    this.resendTimer = setInterval(() => {
+      const remaining = Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
+      this.resendSeconds.set(remaining);
+      if (!remaining) this.stopResendCountdown();
+    }, 1000);
+  }
+  private stopResendCountdown() {
+    if (this.resendTimer !== null) clearInterval(this.resendTimer);
+    this.resendTimer = null;
+    this.resendSeconds.set(0);
+  }
+  ngOnDestroy() {
+    this.requestVersion++;
+    this.stopResendCountdown();
+    if (this.mode === 'login') this.auth.cancelLogin();
+    this.loginChallenge.set(null);
+    this.form.controls.password.reset('');
   }
   async resend() {
     if (this.busy()) return;

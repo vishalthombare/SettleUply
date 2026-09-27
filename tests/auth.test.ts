@@ -46,6 +46,12 @@ let route: {
 };
 let returnUrl: string | null;
 let preferenceLoads: number;
+let pages: AuthPage[];
+const challenge = {
+  challenge_token: 'test-login-challenge-token-1234567890',
+  expires_in: 600,
+  resend_after: 60,
+};
 
 function dispatch(method: string, url: string, body: unknown = {}) {
   return runInInjectionContext(injector, () =>
@@ -72,12 +78,24 @@ const user: User = {
 async function login(role: User['role'] = 'USER') {
   const index = requests.length;
   const result = auth.login({ email: user.email, password: 'Password123' });
-  respond(index, { access_token: 'saved-access', user: { ...user, role } });
+  respond(index, challenge);
   await result;
+  const verified = auth.verifyLogin({ challenge_token: challenge.challenge_token, otp: '123456' });
+  respond(index + 1, { access_token: 'saved-access', user: { ...user, role } });
+  await verified;
 }
 function page(mode: string) {
   route.snapshot.data.mode = mode;
-  return runInInjectionContext(injector, () => new AuthPage());
+  const component = runInInjectionContext(injector, () => new AuthPage());
+  pages.push(component);
+  return component;
+}
+async function requestLoginCode(component: AuthPage, resendAfter = 60) {
+  component.form.patchValue({ email: user.email, password: 'Password123' });
+  const index = requests.length;
+  const pending = component.submit();
+  respond(index, { ...challenge, resend_after: resendAfter });
+  await pending;
 }
 
 beforeEach(() => {
@@ -86,6 +104,7 @@ beforeEach(() => {
   routes = [];
   returnUrl = null;
   preferenceLoads = 0;
+  pages = [];
   route = {
     snapshot: {
       data: { mode: 'login' },
@@ -138,7 +157,10 @@ beforeEach(() => {
   );
   auth = injector.get(Auth);
 });
-afterEach(() => injector.destroy());
+afterEach(() => {
+  for (const component of pages) component.ngOnDestroy();
+  injector.destroy();
+});
 
 test('fresh startup, refresh and logout make zero requests without a saved token', async () => {
   for (const value of [null, '', ' ', 'null', 'undefined']) {
@@ -164,20 +186,178 @@ test('protected APIs and direct refresh/change-password requests are blocked bef
   assert.equal(requests.length, 0);
 });
 
-test('login saves access token and authorizes protected requests; logout clears storage', async () => {
+test('verified login saves access token and authorizes protected requests; logout clears storage', async () => {
   await login();
   assert.equal(requests[0].request.headers.get('X-Application-Type'), 'WEB');
   assert.equal(storage.get(ACCESS_TOKEN_KEY), 'saved-access');
   const data = firstValueFrom(dispatch('GET', environment.API_BASE_URL + '/contacts'));
-  assert.equal(requests[1].request.headers.get('Authorization'), 'Bearer saved-access');
-  assert.equal(requests[1].request.headers.get('X-Application-Type'), 'WEB');
-  respond(1);
+  assert.equal(requests[2].request.headers.get('Authorization'), 'Bearer saved-access');
+  assert.equal(requests[2].request.headers.get('X-Application-Type'), 'WEB');
+  respond(2);
   await data;
   const logout = auth.logout();
-  respond(2);
+  respond(3);
   await logout;
   assert.equal(storage.has(ACCESS_TOKEN_KEY), false);
   assert.equal(auth.token(), null);
+});
+
+test('password login waits for OTP, clears the password, and allows invalid-code retries', async () => {
+  const component = page('login');
+  await requestLoginCode(component);
+  assert.equal(component.loginChallenge()?.challenge_token, challenge.challenge_token);
+  assert.equal(component.form.controls.password.value, '');
+  assert.equal(auth.user(), null);
+  assert.equal(auth.token(), null);
+  assert.equal(storage.size, 0);
+  assert.deepEqual(routes, []);
+  for (const otp of ['', '123', 'abcdef']) {
+    component.form.controls.otp.setValue(otp);
+    await component.submit();
+    assert.equal(requests.length, 1);
+  }
+  component.form.controls.otp.setValue('123456');
+  const invalid = component.submit();
+  await component.submit();
+  assert.equal(requests.length, 2);
+  assert.equal(requests[1].request.url, environment.API_BASE_URL + '/auth/verify-login-otp');
+  assert.equal(requests[1].request.headers.has('Authorization'), false);
+  assert.deepEqual(requests[1].request.body, {
+    challenge_token: challenge.challenge_token,
+    otp: '123456',
+  });
+  requests[1].response.error(
+    new HttpErrorResponse({
+      status: 400,
+      error: { message: 'Invalid or expired code.' },
+    }),
+  );
+  await invalid;
+  assert.equal(component.error(), 'Invalid or expired code.');
+  assert.ok(component.loginChallenge());
+  assert.equal(storage.size, 0);
+  const retried = component.submit();
+  respond(2, { access_token: 'verified-access', user });
+  await retried;
+  assert.equal(storage.get(ACCESS_TOKEN_KEY), 'verified-access');
+  assert.equal(routes.at(-1), '/dashboard');
+  component.ngOnDestroy();
+  assert.equal(auth.token(), 'verified-access');
+});
+
+test('login resend waits for cooldown, replaces the challenge, and sends only once', async (context) => {
+  context.mock.timers.enable({ apis: ['Date', 'setInterval'], now: 1000 });
+  const component = page('login');
+  await requestLoginCode(component);
+  await component.resendLogin();
+  assert.equal(requests.length, 1);
+  context.mock.timers.tick(59000);
+  assert.equal(component.resendSeconds(), 1);
+  await component.resendLogin();
+  assert.equal(requests.length, 1);
+  context.mock.timers.tick(1000);
+  assert.equal(component.resendSeconds(), 0);
+  component.form.controls.otp.setValue('123456');
+  const resent = component.resendLogin();
+  await component.resendLogin();
+  assert.equal(requests.length, 2);
+  assert.equal(requests[1].request.url, environment.API_BASE_URL + '/auth/resend-login-otp');
+  assert.equal(requests[1].request.headers.has('Authorization'), false);
+  assert.deepEqual(requests[1].request.body, { challenge_token: challenge.challenge_token });
+  const replacement = { ...challenge, challenge_token: 'replacement-login-challenge-token-12345' };
+  respond(1, replacement);
+  await resent;
+  assert.equal(component.loginChallenge()?.challenge_token, replacement.challenge_token);
+  assert.equal(component.form.controls.otp.value, '');
+  assert.equal(component.resendSeconds(), 60);
+  assert.equal(storage.size, 0);
+  await assert.rejects(
+    auth.verifyLogin({ challenge_token: challenge.challenge_token, otp: '123456' }),
+  );
+  assert.equal(requests.length, 2);
+  component.form.controls.otp.setValue('654321');
+  const verified = component.submit();
+  assert.deepEqual(requests[2].request.body, {
+    challenge_token: replacement.challenge_token,
+    otp: '654321',
+  });
+  respond(2, { access_token: 'new-access', user });
+  await verified;
+  assert.equal(auth.token(), 'new-access');
+});
+
+test('changing login details requires the password again and keeps the email', async () => {
+  const component = page('login');
+  await requestLoginCode(component);
+  component.form.controls.otp.setValue('123456');
+  component.backToLogin();
+  assert.equal(component.loginChallenge(), null);
+  assert.equal(component.resendSeconds(), 0);
+  assert.equal(component.form.controls.email.value, user.email);
+  assert.equal(component.form.controls.password.value, '');
+  assert.equal(component.form.controls.otp.value, '');
+  await component.submit();
+  assert.equal(requests.length, 1);
+  await assert.rejects(
+    auth.verifyLogin({ challenge_token: challenge.challenge_token, otp: '123456' }),
+  );
+  assert.equal(requests.length, 1);
+});
+
+test('resend delivery failure returns to password entry and shows the server message', async () => {
+  const component = page('login');
+  await requestLoginCode(component, 0);
+  const resent = component.resendLogin();
+  const message = 'We could not send the sign-in code. Wait one minute, then sign in again.';
+  requests[1].response.error(new HttpErrorResponse({ status: 503, error: { message } }));
+  await resent;
+  assert.equal(component.loginChallenge(), null);
+  assert.equal(component.error(), message);
+  assert.equal(component.busy(), false);
+  assert.equal(component.form.controls.password.invalid, true);
+  assert.equal(storage.size, 0);
+});
+
+for (const action of ['login', 'verify', 'resend'] as const) {
+  test(`a late ${action} response cannot revive a canceled sign-in`, async () => {
+    const component = page('login');
+    if (action !== 'login') await requestLoginCode(component, 0);
+    else component.form.patchValue({ email: user.email, password: 'Password123' });
+    component.form.controls.otp.setValue('123456');
+    const index = requests.length;
+    const pending = action === 'resend' ? component.resendLogin() : component.submit();
+    component.backToLogin();
+    respond(index, action === 'verify' ? { access_token: 'late-access', user } : challenge);
+    await pending;
+    assert.equal(component.loginChallenge(), null);
+    assert.equal(component.error(), '');
+    assert.equal(component.busy(), false);
+    assert.equal(auth.user(), null);
+    assert.equal(auth.token(), null);
+    assert.equal(storage.size, 0);
+    assert.deepEqual(routes, []);
+  });
+}
+
+test('leaving the login page ignores a late verification response', async () => {
+  const component = page('login');
+  await requestLoginCode(component);
+  component.form.controls.otp.setValue('123456');
+  const pending = component.submit();
+  component.ngOnDestroy();
+  respond(1, { access_token: 'late-access', user });
+  await pending;
+  assert.equal(auth.token(), null);
+  assert.equal(storage.size, 0);
+  assert.deepEqual(routes, []);
+});
+
+test('OTP verification cannot start from a reloaded or absent login challenge', async () => {
+  await assert.rejects(
+    auth.verifyLogin({ challenge_token: challenge.challenge_token, otp: '123456' }),
+  );
+  await assert.rejects(auth.resendLogin(challenge.challenge_token));
+  assert.equal(requests.length, 0);
 });
 
 test('saved login restores once, rotates stored access token, and clears it on refresh failure', async () => {
@@ -205,7 +385,7 @@ test('clearing storage blocks even a previously logged-in tab and suppresses ref
     status: 401,
   });
   assert.equal(await auth.refresh(), false);
-  assert.equal(requests.length, 1);
+  assert.equal(requests.length, 2);
   assert.equal(auth.user(), null);
 });
 
@@ -276,7 +456,7 @@ test('valid auth forms still submit explicitly and duplicate clicks do not send 
     await component.submit();
     assert.equal(requests.length, index + 1);
     assert.equal(requests[index].request.url, environment.API_BASE_URL + '/auth/' + path);
-    respond(index, mode === 'login' ? { access_token: 'saved-access', user } : null);
+    respond(index, mode === 'login' ? challenge : null);
     await pending;
     assert.equal(component.error(), '');
   }
@@ -317,7 +497,8 @@ test('mobile auth and protected calls carry MOBILE without changing token gating
     assert.equal(requests[0].request.headers.get('X-Application-Type'), 'MOBILE');
     const result = firstValueFrom(dispatch('GET', environment.API_BASE_URL + '/contacts'));
     assert.equal(requests[1].request.headers.get('X-Application-Type'), 'MOBILE');
-    respond(1);
+    assert.equal(requests[2].request.headers.get('X-Application-Type'), 'MOBILE');
+    respond(2);
     await result;
   } finally {
     environment.APPLICATION_TYPE = original;
@@ -328,7 +509,11 @@ test('admin login opens the admin screen even with a saved personal return URL',
   for (const target of [null, '/dashboard', '/people/12', '/groups/4', '/profile']) {
     returnUrl = target;
     const component = page('login');
-    component.form.patchValue({ email: user.email, password: 'Password123' });
+    const priorRoutes = routes.length;
+    await requestLoginCode(component);
+    assert.equal(routes.length, priorRoutes);
+    assert.equal(auth.user(), null);
+    component.form.controls.otp.setValue('123456');
     const index = requests.length;
     const pending = component.submit();
     respond(index, { access_token: 'admin-access', user: { ...user, role: 'ADMIN' } });
@@ -348,7 +533,11 @@ test('regular login keeps personal return URLs and defaults safely to the dashbo
   ]) {
     returnUrl = target;
     const component = page('login');
-    component.form.patchValue({ email: user.email, password: 'Password123' });
+    const priorRoutes = routes.length;
+    await requestLoginCode(component);
+    assert.equal(routes.length, priorRoutes);
+    assert.equal(auth.user(), null);
+    component.form.controls.otp.setValue('123456');
     const index = requests.length;
     const pending = component.submit();
     respond(index, { access_token: 'user-access', user });
@@ -430,7 +619,7 @@ test('admin shell exposes only admin links, skips personal settings, and can sig
   );
   assert.equal(preferenceLoads, 0);
   const pending = shell.logout();
-  respond(1);
+  respond(2);
   await pending;
   assert.equal(auth.user(), null);
   assert.equal(storage.has(ACCESS_TOKEN_KEY), false);

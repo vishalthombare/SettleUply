@@ -751,7 +751,7 @@ select:not(:disabled):hover {
   border-color: #a5b49a;
   background-color: #fcfdf9;
 }
-select:focus {
+select:not(:disabled):focus {
   border-color: var(--green);
 }
 select:disabled {

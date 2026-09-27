@@ -5,10 +5,11 @@ import { Api, errorMessage, Toast } from '../core/api';
 import { Auth } from '../core/auth';
 import { Preferences } from '../core/preferences';
 import { Settings, User, Catalog } from '../core/models';
+import { PasswordFieldComponent } from '../shared/password-field';
 
 @Component({
   standalone: true,
-  imports: [ReactiveFormsModule, FormsModule, RouterLink],
+  imports: [ReactiveFormsModule, FormsModule, RouterLink, PasswordFieldComponent],
   template: `<div class="page-heading">
       <div>
         <span class="eyebrow">MAKE YOURSELF AT HOME</span>
@@ -28,17 +29,19 @@ import { Settings, User, Catalog } from '../core/models';
         </form>
         <form class="panel form-panel" [formGroup]="security" (ngSubmit)="changePassword()">
           <h2>Security</h2>
-          <label
-            >Current password<input
-              type="password"
-              autocomplete="current-password"
-              formControlName="current_password" /></label
-          ><label
-            >New password<input
-              type="password"
-              autocomplete="new-password"
-              formControlName="new_password" /></label
-          ><small class="muted"
+          <app-password-field
+            inputId="current-password"
+            label="Current password"
+            [control]="security.controls.current_password"
+            autocomplete="current-password"
+          />
+          <app-password-field
+            inputId="new-password"
+            label="New password"
+            [control]="security.controls.new_password"
+            autocomplete="new-password"
+          />
+          <small class="muted"
             >10+ characters, uppercase, lowercase, and a number. Changing your password signs out
             all sessions.</small
           ><button class="secondary" [disabled]="busy() || security.invalid">
