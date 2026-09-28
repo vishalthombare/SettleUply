@@ -79,7 +79,7 @@ def test_notification_messages_keep_their_content_and_escape_html(kind):
     message = ('Alex & Sam updated "Dinner".\n'
                '<script>alert(1)</script><a href="https://evil.example">Pay here</a>')
     content = notification_email(kind=kind, message=message)
-    baseline = notification_email(kind=kind, message='A record was updated.')
+    baseline = notification_email(kind=kind, message='A record was updated.\nSee the details.')
     rendered = ParsedEmail(content.html)
 
     assert message in content.text
