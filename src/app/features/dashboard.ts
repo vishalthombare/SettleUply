@@ -14,6 +14,7 @@ import {
 
 @Component({
   standalone: true,
+  host: { class: 'dashboard-page' },
   imports: [
     RouterLink,
     BalancesComponent,
@@ -25,7 +26,6 @@ import {
   ],
   template: ` <div class="page-heading">
       <div>
-        <span class="eyebrow">YOUR MONEY AT A GLANCE</span>
         <h1>Good {{ greeting }}, {{ firstName }} <span class="wave">✳</span></h1>
         <p>A clear view. A lighter mind.</p>
       </div>

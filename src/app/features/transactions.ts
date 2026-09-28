@@ -24,7 +24,7 @@ import {
           {{
             form.controls.transaction_type.value === 'PERSONAL_EXPENSE'
               ? 'Keep track of something you spent.'
-              : 'Keep your shared money clear.'
+              : 'Record a new loan. For money returned, use Receive repayment or Repay this person on the person’s page.'
           }}
         </p>
       </div>
@@ -377,23 +377,45 @@ function units(value: string): bigint {
     <div class="page-heading">
       <div>
         <span class="eyebrow">ONE STEP CLOSER TO EVEN</span>
-        <h1>Settle up.</h1>
-        <p>Record a partial or full repayment.</p>
+        <h1>
+          {{
+            direction === 'receive'
+              ? 'Receive repayment.'
+              : direction === 'pay'
+                ? 'Repay this person.'
+                : 'Settle up.'
+          }}
+        </h1>
+        <p>
+          Choose the original loan and record money returned against it. For multiple loans, record
+          each portion separately.
+        </p>
       </div>
     </div>
     @if (!id) {
       <section class="panel form-panel">
         <label
-          >Choose a record<select [ngModel]="selected" (ngModelChange)="choose($event)">
+          >Choose a record<select
+            [ngModel]="selected"
+            [disabled]="busy()"
+            (ngModelChange)="choose($event)"
+          >
             <option [ngValue]="null">Choose an outstanding transaction</option>
             @for (t of choices(); track t.id) {
               <option [ngValue]="t.id">
+                {{ t.transaction_type === 'MONEY_LENT' ? 'Receive repayment' : 'Repay loan' }} ·
                 {{ t.purpose }} · {{ t.outstanding_amount | money: t.currency }}
               </option>
             }
           </select></label
         >
       </section>
+    }
+    @if (!id && choicesLoaded() && !choices().length && !error()) {
+      <p class="muted">
+        No matching outstanding loans available. Repayments must be recorded against an original
+        loan.
+      </p>
     }
     @if (transaction(); as t) {
       <form class="panel form-panel" [formGroup]="form" (ngSubmit)="save()">
@@ -459,9 +481,11 @@ export class SettlementForm {
   private preferences = inject(Preferences);
   private fb = inject(FormBuilder);
   id = Number(this.route.snapshot.paramMap.get('id')) || null;
+  direction = this.route.snapshot.queryParamMap.get('direction');
   selected: number | null = null;
   transaction = signal<Transaction | null>(null);
   choices = signal<Transaction[]>([]);
+  choicesLoaded = signal(false);
   methods = signal<Catalog[]>([]);
   error = signal('');
   busy = signal(false);
@@ -488,21 +512,27 @@ export class SettlementForm {
           rows.filter(
             (t) =>
               t.transaction_type !== 'PERSONAL_EXPENSE' &&
+              (this.direction !== 'receive' || t.transaction_type === 'MONEY_LENT') &&
+              (this.direction !== 'pay' || t.transaction_type === 'MONEY_BORROWED') &&
               t.status !== 'CANCELLED' &&
               units(t.outstanding_amount) > 0n,
           ),
         );
+        this.choicesLoaded.set(true);
       }
     } catch (e) {
       this.error.set(errorMessage(e));
     }
   }
   async choose(id: number | null) {
+    if (this.busy()) return;
+    this.form.controls.amount.reset();
     this.selected = id;
     this.transaction.set(null);
     if (id) {
       try {
-        this.transaction.set(await this.api.get<Transaction>(`/transactions/${id}`));
+        const result = await this.api.get<Transaction>(`/transactions/${id}`);
+        if (this.selected === id) this.transaction.set(result);
       } catch (e) {
         this.error.set(errorMessage(e));
       }
@@ -510,7 +540,7 @@ export class SettlementForm {
   }
   async save() {
     const t = this.transaction();
-    if (!t || this.form.invalid) return;
+    if (!t || this.form.invalid || this.busy()) return;
     const v = this.form.getRawValue();
     if (units(v.amount!) <= 0n || units(v.amount!) > units(t.outstanding_amount)) {
       this.error.set('Enter an amount greater than zero and no more than the outstanding balance.');

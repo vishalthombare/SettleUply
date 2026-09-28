@@ -126,7 +126,9 @@ export class BalancesComponent {
   compact = input(false);
   protected sign = moneySign;
   entries() {
-    return Object.entries(this.values()).sort(([a], [b]) => a.localeCompare(b));
+    return Object.entries(this.values())
+      .filter(([, amount]) => moneySign(amount) !== 0)
+      .sort(([a], [b]) => a.localeCompare(b));
   }
 }
 

@@ -344,48 +344,97 @@ main#main {
 }
 .dashboard-balances {
   grid-template-columns: minmax(0, 1.25fr) repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 12px;
+}
+.dashboard-page {
+  display: block;
+}
+main#main:has(> .dashboard-page) {
+  padding-top: 24px;
+}
+.dashboard-page .page-heading {
+  margin-bottom: 20px;
+  gap: 16px;
+}
+.dashboard-page .page-heading > div {
+  min-width: 0;
+}
+.dashboard-page .page-heading h1 {
+  font-size: clamp(24px, 2.2vw, 32px);
+  letter-spacing: -1px;
+  margin-bottom: 6px;
+  overflow-wrap: anywhere;
+}
+.dashboard-page .page-heading .wave {
+  font-size: 24px;
+}
+.dashboard-page .page-heading p {
+  font-size: 12px;
+}
+.dashboard-page .page-heading > .button {
+  margin-top: 0;
+  flex-shrink: 0;
+}
+.dashboard-page .quick-strip {
+  padding: 8px 0 16px;
+  gap: 8px 20px;
+}
+.dashboard-page .quick-strip a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
 }
 .net-balance-card {
   height: 100%;
-  padding: 26px;
+  padding: 18px;
   border: 1px solid #afc6a0;
-  border-top: 4px solid var(--green);
-  border-radius: 15px;
+  border-top: 3px solid var(--green);
+  border-radius: 12px;
   background: #fff;
   box-shadow: 0 4px 18px #183f3308;
 }
 .net-balance-card .eyebrow {
-  margin-bottom: 8px;
+  margin-bottom: 5px;
+  font-size: 10px;
+  letter-spacing: 1.2px;
   color: var(--green);
 }
 .net-formula {
-  margin-bottom: 22px;
+  margin-bottom: 12px;
   color: var(--muted-strong);
   font-size: 12px;
 }
 .net-balances {
   display: grid;
-  gap: 18px;
+  gap: 10px;
+}
+.net-balance-entry {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 3px 12px;
 }
 .net-balance-entry strong,
 .net-empty {
   display: block;
-  font-size: clamp(26px, 2.8vw, 38px);
+  font-size: clamp(20px, 1.8vw, 26px);
   font-weight: 600;
-  letter-spacing: -1.2px;
+  letter-spacing: -0.7px;
   line-height: 1.2;
   font-variant-numeric: tabular-nums;
   overflow-wrap: anywhere;
 }
 .net-status {
   display: block;
-  margin: 7px 0 0;
-  font-size: 12px;
+  margin: 0;
+  font-size: 11px;
   color: var(--muted-strong);
 }
 .net-scope {
-  margin: 22px 0 0;
-  padding-top: 14px;
+  margin: 12px 0 0;
+  padding-top: 10px;
   border-top: 1px solid var(--line);
   color: var(--muted-strong);
   font-size: 11px;
@@ -478,6 +527,33 @@ main#main {
   margin: 0;
   font-size: 18px;
   letter-spacing: -0.4px;
+}
+.dashboard-balances .balance-card {
+  min-height: 0;
+  padding: 18px;
+  border-radius: 12px;
+}
+.dashboard-balances .balance-card .eyebrow {
+  margin-bottom: 14px;
+  font-size: 10px;
+  letter-spacing: 1.2px;
+}
+.dashboard-balances .balance-card strong,
+.dashboard-balances .balance-card strong + strong {
+  font-size: clamp(20px, 1.8vw, 26px);
+  letter-spacing: -0.7px;
+}
+.dashboard-balances .balance-card:after {
+  display: none;
+}
+.dashboard-page .monthly-spending .balance-card {
+  min-height: 48px;
+  padding: 10px 18px;
+  border-radius: 10px;
+}
+.dashboard-page .monthly-spending .balance-card strong {
+  font-size: 14px;
+  letter-spacing: 0;
 }
 .quick-strip {
   display: flex;
@@ -1667,12 +1743,14 @@ dd {
     grid-column: 1/-1;
   }
   .net-balance-card {
-    padding: 23px 20px;
-    border-radius: 13px;
+    padding: 16px;
   }
   .net-balance-entry strong,
   .net-empty {
-    font-size: 32px;
+    font-size: 24px;
+  }
+  .dashboard-balances .balance-card {
+    padding: 16px;
   }
   .balance-card {
     min-height: 173px;
@@ -2045,6 +2123,9 @@ dd {
   }
 }
 @media (max-width: 370px) {
+  .dashboard-balances {
+    grid-template-columns: minmax(0, 1fr);
+  }
   main#main {
     padding-left: 15px;
     padding-right: 15px;

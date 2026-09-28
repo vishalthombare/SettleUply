@@ -34,7 +34,7 @@ import {
         <option value="">All people</option>
         <option value="owes_me">Owes me</option>
         <option value="i_owe">I owe</option>
-        <option value="settled">Settled</option>
+        <option value="settled">Balanced</option>
         <option value="overdue">Overdue</option>
       </select>
     </div>
@@ -59,7 +59,7 @@ import {
                   >
                 </div>
               } @empty {
-                <small class="muted">All settled up</small>
+                <small class="muted">No net outstanding</small>
               }
             </div></a
           >
@@ -134,12 +134,20 @@ export class PeoplePage {
           tone="receivable"
         /><app-balances label="YOU OWE" [values]="d.payables" tone="payable" />
       </div>
+      <p class="muted">
+        Net outstanding per currency. Individual loan records remain in your history.
+      </p>
       <div class="quick-strip">
         <a routerLink="/transactions/new" [queryParams]="{ type: 'MONEY_LENT', contact: id }"
           >↗ Give money</a
         ><a routerLink="/transactions/new" [queryParams]="{ type: 'MONEY_BORROWED', contact: id }"
           >↙ Borrow money</a
-        ><a routerLink="/settlements/new" [queryParams]="{ contact: id }">✓ Add settlement</a>
+        ><a routerLink="/settlements/new" [queryParams]="{ contact: id, direction: 'receive' }"
+          >✓ Receive repayment</a
+        >
+        <a routerLink="/settlements/new" [queryParams]="{ contact: id, direction: 'pay' }"
+          >✓ Repay this person</a
+        >
       </div>
       <section class="panel">
         <div class="section-heading"><h2>Your shared history</h2></div>
