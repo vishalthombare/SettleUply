@@ -44,3 +44,16 @@ test('currency formatting respects zero and three decimal currencies', () => {
   assert.equal(money.transform('-10.1250', 'KWD', true), 'KWD -10.125');
   assert.equal(money.transform(undefined, 'INR', true), '—');
 });
+
+import { formatAmount, amountWords } from '../src/app/core/amount-entry';
+test('amount entry preserves decimals and groups INR separately', () => {
+  assert.equal(formatAmount('1000000.50', 'INR'), '10,00,000.50');
+  assert.equal(formatAmount('1000000.50', 'MYR'), '1,000,000.50');
+  assert.equal(formatAmount('1000.', 'INR'), '1,000.');
+  assert.equal(formatAmount('999999999999999.99', 'USD'), '999,999,999,999,999.99');
+  assert.equal(amountWords('1000', 'INR'), 'One thousand rupees');
+  assert.equal(amountWords('100000', 'INR'), 'One lakh rupees');
+  assert.equal(amountWords('100000', 'MYR'), 'One hundred thousand ringgit');
+  assert.equal(amountWords('10.50', 'MYR'), 'Ten point five zero ringgit');
+  assert.equal(amountWords('', 'INR'), '');
+});

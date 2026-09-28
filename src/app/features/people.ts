@@ -1,3 +1,4 @@
+import { TransactionDraft } from '../core/transaction-draft';
 import { Component, inject, signal } from '@angular/core';
 import { FormBuilder, ReactiveFormsModule, FormsModule, Validators } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
@@ -202,7 +203,9 @@ export class PersonPage {
 @Component({
   standalone: true,
   imports: [ReactiveFormsModule, RouterLink],
-  template: `<a class="back-link" routerLink="/people">← Your people</a>
+  template: `<a class="back-link" [routerLink]="returnPath()" [queryParams]="returnQuery()"
+      >← Your people</a
+    >
     <div class="page-heading">
       <div>
         <span class="eyebrow">YOUR CIRCLE</span>
@@ -230,7 +233,8 @@ export class PersonPage {
         <p class="form-error" role="alert">{{ error() }}</p>
       }
       <div class="form-actions">
-        <a routerLink="/people" class="button secondary">Cancel</a
+        <a [routerLink]="returnPath()" [queryParams]="returnQuery()" class="button secondary"
+          >Cancel</a
         ><button class="primary" [disabled]="busy() || form.invalid">
           {{ busy() ? 'Saving…' : 'Save person' }}
         </button>
@@ -238,6 +242,7 @@ export class PersonPage {
     </form>`,
 })
 export class ContactForm {
+  private draft = inject(TransactionDraft);
   private api = inject(Api);
   private route = inject(ActivatedRoute);
   private router = inject(Router);
@@ -258,6 +263,16 @@ export class ContactForm {
   });
   constructor() {
     void this.load();
+  }
+  returnPath() {
+    return this.route.snapshot.queryParamMap.get('transactionDraft') === 'true' && this.draft.value
+      ? this.draft.editId
+        ? ['/transactions', this.draft.editId, 'edit']
+        : ['/transactions/new']
+      : ['/people'];
+  }
+  returnQuery() {
+    return this.returnPath()[0] === '/people' ? {} : { resume: 'true' };
   }
   async load() {
     try {
@@ -295,7 +310,15 @@ export class ContactForm {
         },
       );
       this.toast.show('Person saved');
-      await this.router.navigate(['/people', result.id]);
+      if (
+        this.route.snapshot.queryParamMap.get('transactionDraft') === 'true' &&
+        this.draft.value
+      ) {
+        await this.router.navigate(
+          this.draft.editId ? ['/transactions', this.draft.editId, 'edit'] : ['/transactions/new'],
+          { queryParams: { resume: 'true', contact: result.id } },
+        );
+      } else await this.router.navigate(['/people', result.id]);
     } catch (e) {
       this.error.set(errorMessage(e));
     } finally {

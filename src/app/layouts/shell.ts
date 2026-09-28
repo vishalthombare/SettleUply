@@ -1,5 +1,5 @@
 import { Component, computed, inject, signal } from '@angular/core';
-import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
+import { Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { Auth } from '../core/auth';
 import { Preferences } from '../core/preferences';
 
@@ -130,12 +130,18 @@ import { Preferences } from '../core/preferences';
             <h2>What’s happening?</h2>
             <button class="icon-button" aria-label="Close" (click)="actions.set(false)">×</button>
           </div>
+          @if (actionError()) {
+            <p class="form-error padded" role="alert">{{ actionError() }}</p>
+          }
+          @if (openingAction()) {
+            <p class="padded muted" role="status">Opening {{ openingAction() }}…</p>
+          }
           @for (action of quickActions; track action.label) {
             <a
               class="action-option"
-              [routerLink]="action.path"
-              [queryParams]="action.query"
-              (click)="actions.set(false)"
+              [attr.href]="actionUrl(action)"
+              [attr.aria-disabled]="openingAction() ? true : null"
+              (click)="openAction($event, action)"
               ><span>{{ action.icon }}</span>
               <div>
                 <strong>{{ action.label }}</strong
@@ -152,6 +158,35 @@ import { Preferences } from '../core/preferences';
 export class Shell {
   auth = inject(Auth);
   actions = signal(false);
+  openingAction = signal('');
+  actionError = signal('');
+  private router = inject(Router);
+
+  actionUrl(action: { path: string; query: object }) {
+    return this.router.serializeUrl(
+      this.router.createUrlTree([action.path], { queryParams: action.query }),
+    );
+  }
+
+  async openAction(event: MouseEvent, action: { label: string; path: string; query: object }) {
+    if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey)
+      return;
+    // Handle normal clicks ourselves so the menu stays visible until navigation succeeds.
+    event.preventDefault();
+    if (this.openingAction()) return false;
+    this.openingAction.set(action.label);
+    this.actionError.set('');
+    try {
+      const opened = await this.router.navigate([action.path], { queryParams: action.query });
+      if (opened) this.actions.set(false);
+      else this.actionError.set('The page could not open. Please try again.');
+    } catch {
+      this.actionError.set('The page could not load. Please try again.');
+    } finally {
+      this.openingAction.set('');
+    }
+    return false;
+  }
   signingOut = signal(false);
   private preferences = inject(Preferences);
   links = computed(() =>

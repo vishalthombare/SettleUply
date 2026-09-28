@@ -2,7 +2,7 @@ import { build } from 'esbuild';
 import { spawnSync } from 'node:child_process';
 
 // Bundle application TS only; Angular runs its real validators and DI in Node.
-const suites = ['auth', 'money', 'repayments'];
+const suites = ['auth', 'money', 'repayments', 'quick-actions', 'transaction-form', 'date-picker'];
 await build({
   entryPoints: suites.map((name) => `tests/${name}.test.ts`),
   outdir: '.test-build',

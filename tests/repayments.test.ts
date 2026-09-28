@@ -106,3 +106,34 @@ for (const [direction, id] of [
     }
   });
 }
+
+test('switching loans clears the previous amount and validation error', async () => {
+  const { injector, form } = await setup('receive');
+  try {
+    await form.choose(1);
+    form.form.controls.amount.setValue('9999');
+    await form.save();
+    assert.ok(form.error());
+    await form.choose(null);
+    assert.equal(form.error(), '');
+    assert.equal(form.form.controls.amount.value, null);
+    assert.equal(form.transaction(), null);
+    assert.equal(form.loading(), false);
+  } finally {
+    injector.destroy();
+  }
+});
+
+test('repayment before the original loan date is blocked before sending', async () => {
+  const { injector, form, requests } = await setup('receive');
+  try {
+    await form.choose(1);
+    form.transaction.set({ ...form.transaction()!, transaction_date: '2026-09-20' });
+    form.form.patchValue({ amount: '100', settlement_date: '2026-09-19' });
+    await form.save();
+    assert.equal(requests.length, 0);
+    assert.match(form.error(), /before the original loan date/);
+  } finally {
+    injector.destroy();
+  }
+});
