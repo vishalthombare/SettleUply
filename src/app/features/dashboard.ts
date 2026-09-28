@@ -3,6 +3,7 @@ import { RouterLink } from '@angular/router';
 import { Api, errorMessage } from '../core/api';
 import { Auth } from '../core/auth';
 import { Dashboard } from '../core/models';
+import { NetBalanceComponent } from '../shared/net-balance';
 import {
   BalancesComponent,
   StateComponent,
@@ -16,6 +17,7 @@ import {
   imports: [
     RouterLink,
     BalancesComponent,
+    NetBalanceComponent,
     StateComponent,
     ActivityListComponent,
     MoneyPipe,
@@ -30,16 +32,17 @@ import {
       <a class="button secondary" routerLink="/activity">View activity ↗</a>
     </div>
     @if (data(); as d) {
-      <div class="balance-grid">
-        <app-balances
-          label="↗  YOU’LL RECEIVE"
-          [values]="d.receivables"
-          [dark]="true"
-        /><app-balances label="↙  YOU OWE" [values]="d.payables" /><app-balances
-          label="−  THIS MONTH SPENT"
-          [values]="d.personal_expenses_this_month"
-        />
+      <div class="balance-grid dashboard-balances">
+        <app-net-balance [values]="d.net_balances" />
+        <app-balances label="↗  YOU’LL RECEIVE" [values]="d.receivables" tone="receivable" />
+        <app-balances label="↙  YOU OWE" [values]="d.payables" tone="payable" />
       </div>
+      <app-balances
+        class="monthly-spending"
+        label="THIS MONTH SPENT"
+        [values]="d.personal_expenses_this_month"
+        [compact]="true"
+      />
       <div class="quick-strip">
         <span>Keep things up to date</span
         ><a routerLink="/transactions/new" [queryParams]="{ type: 'PERSONAL_EXPENSE' }"
@@ -67,7 +70,11 @@ import {
                 <strong>{{ t.purpose }}</strong
                 ><small class="danger">Overdue · {{ t.due_date | localDate }}</small>
               </div>
-              <strong>{{ t.outstanding_amount | money: t.currency }}</strong></a
+              <strong
+                [class.amount-receivable]="t.transaction_type === 'MONEY_LENT'"
+                [class.amount-payable]="t.transaction_type === 'MONEY_BORROWED'"
+                >{{ t.outstanding_amount | money: t.currency }}</strong
+              ></a
             >
           }
           @for (t of d.due_soon; track t.id) {
@@ -77,7 +84,11 @@ import {
                 <strong>{{ t.purpose }}</strong
                 ><small>{{ t.due_date | localDate }}</small>
               </div>
-              <strong>{{ t.outstanding_amount | money: t.currency }}</strong></a
+              <strong
+                [class.amount-receivable]="t.transaction_type === 'MONEY_LENT'"
+                [class.amount-payable]="t.transaction_type === 'MONEY_BORROWED'"
+                >{{ t.outstanding_amount | money: t.currency }}</strong
+              ></a
             >
           }
           @if (!d.overdue.length && !d.due_soon.length) {
@@ -104,7 +115,11 @@ import {
                 ><small>{{
                   person.transaction_type === 'MONEY_LENT' ? 'You’ll receive' : 'You owe'
                 }}</small></span
-              ><strong>{{ person.amount | money: person.currency }}</strong></a
+              ><strong
+                [class.amount-receivable]="person.transaction_type === 'MONEY_LENT'"
+                [class.amount-payable]="person.transaction_type === 'MONEY_BORROWED'"
+                >{{ person.amount | money: person.currency }}</strong
+              ></a
             >
           } @empty {
             <app-state

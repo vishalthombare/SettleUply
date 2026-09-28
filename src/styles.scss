@@ -2,12 +2,14 @@
 :root {
   --ink: #1c3029;
   --muted: #737e76;
+  --muted-strong: #59655d;
   --green: #183f33;
   --lime: #d7edae;
   --paper: #f6f7f2;
   --line: #e2e7dc;
   --white: #fff;
   --danger: #a43e33;
+  --receivable: #216640;
   font-family:
     Inter,
     'Avenir Next',
@@ -125,6 +127,15 @@ button,
 }
 .danger {
   color: var(--danger) !important;
+}
+.amount-receivable {
+  color: var(--receivable);
+}
+.amount-payable {
+  color: var(--danger);
+}
+.amount-zero {
+  color: var(--muted);
 }
 .full {
   width: 100%;
@@ -328,10 +339,62 @@ main#main {
 .balance-grid.two {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
+.balance-grid > * {
+  min-width: 0;
+}
+.dashboard-balances {
+  grid-template-columns: minmax(0, 1.25fr) repeat(2, minmax(0, 1fr));
+}
+.net-balance-card {
+  height: 100%;
+  padding: 26px;
+  border: 1px solid #afc6a0;
+  border-top: 4px solid var(--green);
+  border-radius: 15px;
+  background: #fff;
+  box-shadow: 0 4px 18px #183f3308;
+}
+.net-balance-card .eyebrow {
+  margin-bottom: 8px;
+  color: var(--green);
+}
+.net-formula {
+  margin-bottom: 22px;
+  color: var(--muted-strong);
+  font-size: 12px;
+}
+.net-balances {
+  display: grid;
+  gap: 18px;
+}
+.net-balance-entry strong,
+.net-empty {
+  display: block;
+  font-size: clamp(26px, 2.8vw, 38px);
+  font-weight: 600;
+  letter-spacing: -1.2px;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.net-status {
+  display: block;
+  margin: 7px 0 0;
+  font-size: 12px;
+  color: var(--muted-strong);
+}
+.net-scope {
+  margin: 22px 0 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+  color: var(--muted-strong);
+  font-size: 11px;
+  line-height: 1.6;
+}
 .balance-card {
   height: 100%;
   min-height: 180px;
-  background: #edf0e5;
+  background: #fff;
   border: 1px solid #e3e7d9;
   border-radius: 15px;
   padding: 26px 26px;
@@ -339,7 +402,7 @@ main#main {
   overflow: hidden;
 }
 .balance-card:after {
-  content: '↗';
+  content: '';
   position: absolute;
   right: 8px;
   bottom: -24px;
@@ -349,15 +412,23 @@ main#main {
   opacity: 0.3;
   pointer-events: none;
 }
-.balance-card.dark {
-  background: var(--green);
-  border-color: var(--green);
-  color: white;
+.balance-card.receivable {
+  background: #eff6ea;
+  border-color: #d8e6d0;
 }
-.balance-card.dark .eyebrow {
-  color: #c4d4b6;
+.balance-card.receivable:after {
+  content: '↗';
+}
+.balance-card.payable {
+  background: #fdf1ee;
+  border-color: #ecd6d1;
+}
+.balance-card.payable:after {
+  content: '↙';
+  color: #d8aaa3;
 }
 .balance-card .eyebrow {
+  color: var(--muted-strong);
   font-size: 9px;
   letter-spacing: 1.5px;
   margin-bottom: 24px;
@@ -371,6 +442,7 @@ main#main {
   letter-spacing: -1px;
   line-height: 1.3;
   overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
 }
 .balance-card strong + strong {
   font-size: 23px;
@@ -381,8 +453,31 @@ main#main {
   font-size: 11px;
   margin-top: 5px;
 }
-.balance-grid app-balances:last-child .balance-card {
-  background: #fff;
+.monthly-spending {
+  display: block;
+  margin-bottom: 6px;
+}
+.balance-card.compact {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 24px;
+  flex-wrap: wrap;
+  min-height: 72px;
+  padding: 16px 22px;
+}
+.balance-card.compact .eyebrow {
+  margin-bottom: 0;
+}
+.balance-card.compact .balance-values {
+  display: flex;
+  gap: 8px 24px;
+  flex-wrap: wrap;
+}
+.balance-card.compact strong {
+  margin: 0;
+  font-size: 18px;
+  letter-spacing: -0.4px;
 }
 .quick-strip {
   display: flex;
@@ -1568,24 +1663,16 @@ dd {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 12px;
   }
-  .balance-grid app-balances:last-child:not(:nth-child(2)) {
+  .dashboard-balances app-net-balance {
     grid-column: 1/-1;
   }
-  .balance-grid app-balances:last-child:not(:nth-child(2)) .balance-card {
-    min-height: 100px;
-    padding: 19px 21px;
+  .net-balance-card {
+    padding: 23px 20px;
+    border-radius: 13px;
   }
-  .balance-grid app-balances:last-child:not(:nth-child(2)) .balance-card .eyebrow {
-    margin-bottom: 12px;
-  }
-  .balance-grid app-balances:last-child:not(:nth-child(2)) .balance-card strong {
-    display: inline-block;
-    margin-right: 20px;
-    font-size: 22px;
-  }
-  .balance-grid app-balances:last-child:not(:nth-child(2)) .balance-card .muted {
-    display: inline;
-    margin-left: 10px;
+  .net-balance-entry strong,
+  .net-empty {
+    font-size: 32px;
   }
   .balance-card {
     min-height: 173px;

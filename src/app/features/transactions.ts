@@ -244,7 +244,13 @@ export class TransactionForm {
         <a class="button secondary" [routerLink]="['/transactions', id, 'edit']">Edit record</a>
       </div>
       <section class="panel detail-panel">
-        <div class="detail-money">{{ t.amount | money: t.currency }}</div>
+        <div
+          class="detail-money"
+          [class.amount-receivable]="t.transaction_type === 'MONEY_LENT'"
+          [class.amount-payable]="t.transaction_type === 'MONEY_BORROWED'"
+        >
+          {{ t.amount | money: t.currency }}
+        </div>
         <div class="detail-grid">
           <div>
             <small>Date</small><strong>{{ t.transaction_date | localDate }}</strong>
@@ -259,7 +265,11 @@ export class TransactionForm {
             </div>
             <div>
               <small>Outstanding</small
-              ><strong>{{ t.outstanding_amount | money: t.currency }}</strong>
+              ><strong
+                [class.amount-receivable]="t.transaction_type === 'MONEY_LENT'"
+                [class.amount-payable]="t.transaction_type === 'MONEY_BORROWED'"
+                >{{ t.outstanding_amount | money: t.currency }}</strong
+              >
             </div>
           }
           <div>
@@ -398,7 +408,11 @@ function units(value: string): bigint {
           </div>
           <div>
             <small>Outstanding</small
-            ><strong>{{ t.outstanding_amount | money: t.currency }}</strong>
+            ><strong
+              [class.amount-receivable]="t.transaction_type === 'MONEY_LENT'"
+              [class.amount-payable]="t.transaction_type === 'MONEY_BORROWED'"
+              >{{ t.outstanding_amount | money: t.currency }}</strong
+            >
           </div>
         </div>
         <label

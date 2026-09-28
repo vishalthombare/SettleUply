@@ -2,18 +2,21 @@ import { Component, Pipe, PipeTransform, input, output, inject } from '@angular/
 import { RouterLink } from '@angular/router';
 import { Activity, Balances, Page } from '../core/models';
 import { Preferences } from '../core/preferences';
+import { moneySign } from '../core/money';
 
 @Pipe({ name: 'money', standalone: true })
 export class MoneyPipe implements PipeTransform {
-  transform(value: string | null | undefined, currency = 'MYR'): string {
+  transform(value: string | null | undefined, currency = 'MYR', signed = false): string {
     if (value === undefined || value === null) return '—';
-    const [whole, fraction = ''] = value.split('.');
+    const direction = moneySign(value);
+    const [whole, fraction = ''] = value.replace(/^[+-]/, '').split('.');
     const digits = Math.max(
       new Intl.NumberFormat('en', { style: 'currency', currency }).resolvedOptions()
         .maximumFractionDigits ?? 2,
       fraction.replace(/0+$/, '').length,
     );
-    const grouped = (whole === '-0' ? '-' : '') + BigInt(whole || '0').toLocaleString('en');
+    const prefix = direction < 0 ? '-' : signed && direction > 0 ? '+' : '';
+    const grouped = prefix + BigInt(whole || '0').toLocaleString('en');
     return `${currency} ${grouped}${digits ? '.' + fraction.padEnd(digits, '0').slice(0, digits) : ''}`;
   }
 }
@@ -95,21 +98,35 @@ export class PaginationComponent {
   selector: 'app-balances',
   standalone: true,
   imports: [MoneyPipe],
-  template: `<div class="balance-card" [class.dark]="dark()">
+  template: `<div
+    class="balance-card"
+    [class.receivable]="tone() === 'receivable'"
+    [class.payable]="tone() === 'payable'"
+    [class.compact]="compact()"
+  >
     <span class="eyebrow">{{ label() }}</span>
-    @for (entry of entries(); track entry[0]) {
-      <strong>{{ entry[1] | money: entry[0] }}</strong>
-    } @empty {
-      <strong>All clear</strong><span class="muted">No balance yet</span>
-    }
+    <div class="balance-values">
+      @for (entry of entries(); track entry[0]) {
+        <strong
+          [class.amount-receivable]="tone() === 'receivable' && sign(entry[1]) !== 0"
+          [class.amount-payable]="tone() === 'payable' && sign(entry[1]) !== 0"
+          [class.amount-zero]="sign(entry[1]) === 0"
+          >{{ entry[1] | money: entry[0] }}</strong
+        >
+      } @empty {
+        <strong>{{ compact() ? 'No spending yet' : 'Nothing outstanding' }}</strong>
+      }
+    </div>
   </div>`,
 })
 export class BalancesComponent {
   values = input<Balances>({});
   label = input('Balance');
-  dark = input(false);
+  tone = input<'neutral' | 'receivable' | 'payable'>('neutral');
+  compact = input(false);
+  protected sign = moneySign;
   entries() {
-    return Object.entries(this.values());
+    return Object.entries(this.values()).sort(([a], [b]) => a.localeCompare(b));
   }
 }
 
@@ -130,7 +147,10 @@ export class BalancesComponent {
           ><strong>{{ item.title }}</strong
           ><small>{{ item.kind | pretty }} · {{ item.date | localDate }}</small></span
         ><span class="record-end"
-          ><strong>{{ item.amount | money: item.currency }}</strong
+          ><strong
+            [class.amount-receivable]="item.kind === 'MONEY_LENT'"
+            [class.amount-payable]="item.kind === 'MONEY_BORROWED'"
+            >{{ item.amount | money: item.currency }}</strong
           ><small>{{ item.status | pretty }}</small></span
         ></a
       >

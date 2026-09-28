@@ -52,7 +52,11 @@ import {
               @for (b of p.balances || []; track b.currency + b.direction) {
                 <div>
                   <small>{{ b.direction === 'receivable' ? 'You’ll receive' : 'You owe' }}</small
-                  ><strong>{{ b.amount | money: b.currency }}</strong>
+                  ><strong
+                    [class.amount-receivable]="b.direction === 'receivable'"
+                    [class.amount-payable]="b.direction === 'payable'"
+                    >{{ b.amount | money: b.currency }}</strong
+                  >
                 </div>
               } @empty {
                 <small class="muted">All settled up</small>
@@ -124,10 +128,11 @@ export class PeoplePage {
         <a class="button secondary" [routerLink]="['/people', id, 'edit']">Edit person</a>
       </div>
       <div class="balance-grid two">
-        <app-balances label="YOU’LL RECEIVE" [values]="d.receivables" [dark]="true" /><app-balances
-          label="YOU OWE"
-          [values]="d.payables"
-        />
+        <app-balances
+          label="YOU’LL RECEIVE"
+          [values]="d.receivables"
+          tone="receivable"
+        /><app-balances label="YOU OWE" [values]="d.payables" tone="payable" />
       </div>
       <div class="quick-strip">
         <a routerLink="/transactions/new" [queryParams]="{ type: 'MONEY_LENT', contact: id }"

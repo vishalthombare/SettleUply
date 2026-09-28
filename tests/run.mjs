@@ -2,9 +2,11 @@ import { build } from 'esbuild';
 import { spawnSync } from 'node:child_process';
 
 // Bundle application TS only; Angular runs its real validators and DI in Node.
+const suites = ['auth', 'money'];
 await build({
-  entryPoints: ['tests/auth.test.ts'],
-  outfile: '.test-build/auth.test.mjs',
+  entryPoints: suites.map((name) => `tests/${name}.test.ts`),
+  outdir: '.test-build',
+  outExtension: { '.js': '.mjs' },
   bundle: true,
   platform: 'node',
   format: 'esm',
@@ -14,7 +16,12 @@ await build({
 // Preload JIT before bundled route imports evaluate Angular's partial declarations.
 const result = spawnSync(
   process.execPath,
-  ['--import', '@angular/compiler', '--test', '.test-build/auth.test.mjs'],
+  [
+    '--import',
+    '@angular/compiler',
+    '--test',
+    ...suites.map((name) => `.test-build/${name}.test.mjs`),
+  ],
   {
     stdio: 'inherit',
   },

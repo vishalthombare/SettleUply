@@ -41,3 +41,7 @@ Serve `index.html`, `ngsw.json`, and `ngsw-worker.js` with revalidation (`Cache-
 After deployment, check a direct `/auth/login` URL, complete login with an email OTP, reload to verify session restoration, and sign out. Confirm browser requests use the HTTPS API and the backend accepts the frontend origin.
 
 App routes are lazy-loaded. Financial amounts are decimal strings; backend calculation and validation remain authoritative. PWA caching includes only application assets, never private API responses.
+
+The dashboard's main card shows the backend's `net_balances` for personal lending and borrowing, separately per currency. Positive net amounts show a plus sign and green “Net to receive”; negative amounts show a minus sign and red “Net to pay.” Zero is neutral and labelled “Balanced overall.” Receivable/payable cards, people balances, and loan activity use the same green/red direction colours. Monthly spending is a separate summary; group balances are separate from the personal net calculation.
+
+Deploy the backend with the `net_balances` response field before this frontend version. No migration is required. If the field is missing from an older API, the net card shows “Not available” while the receivable and payable totals remain visible. Run `npm test` to verify authentication and exact signed-money formatting.

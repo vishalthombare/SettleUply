@@ -154,6 +154,7 @@ export interface Notification {
 export interface Dashboard {
   receivables: Balances;
   payables: Balances;
+  net_balances: Balances;
   personal_expenses_this_month: Balances;
   due_soon: Transaction[];
   overdue: Transaction[];
