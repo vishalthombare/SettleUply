@@ -1,8 +1,6 @@
-from collections import defaultdict
-from datetime import date
 from decimal import Decimal
 from zoneinfo import ZoneInfo
-from sqlalchemy import select, func
+from sqlalchemy import select, func, case
 from app.models import Transaction, TransactionSettlement, UserSettings
 from app.models.enums import TransactionType as TT, TransactionStatus as TS
 from app.db.base import utcnow
@@ -40,13 +38,22 @@ class BalanceCalculationService(Repository):
         settled = select(TransactionSettlement.transaction_id, func.sum(TransactionSettlement.amount).label('paid')).where(TransactionSettlement.user_id == user_id).group_by(TransactionSettlement.transaction_id).subquery()
         return select(Transaction, (Transaction.amount - func.coalesce(settled.c.paid, 0)).label('outstanding')).outerjoin(settled, settled.c.transaction_id == Transaction.id).where(Transaction.user_id == user_id, Transaction.deleted_at.is_(None), Transaction.status != TS.CANCELLED)
 
+    def person_balances_query(self, user_id):
+        rows = self.outstanding_query(user_id).subquery()
+        signed = case((rows.c.transaction_type == TT.MONEY_LENT, rows.c.outstanding),
+                      else_=-rows.c.outstanding)
+        return select(rows.c.contact_id, rows.c.currency, func.sum(signed).label('net')).where(
+            rows.c.contact_id.is_not(None), rows.c.transaction_type != TT.PERSONAL_EXPENSE,
+        ).group_by(rows.c.contact_id, rows.c.currency)
+
     async def totals(self, user_id, contact_id=None):
-        query = self.outstanding_query(user_id)
+        rows = self.person_balances_query(user_id).subquery()
+        query = select(rows)
         if contact_id is not None:
-            query = query.where(Transaction.contact_id == contact_id)
-        query = query.subquery()
-        rows = (await self.db.execute(select(query.c.transaction_type, query.c.currency, func.sum(query.c.outstanding)).where(query.c.transaction_type != TT.PERSONAL_EXPENSE).group_by(query.c.transaction_type, query.c.currency))).all()
+            query = query.where(rows.c.contact_id == contact_id)
         result = {'receivables': {}, 'payables': {}}
-        for kind, currency, amount in rows:
-            result['receivables' if kind == TT.MONEY_LENT else 'payables'][currency] = amount
+        for _, currency, net in (await self.db.execute(query)).all():
+            # Offset only within one person and currency, then aggregate each side.
+            for key, amount in [('receivables', max(net, ZERO)), ('payables', max(-net, ZERO))]:
+                result[key][currency] = result[key].get(currency, ZERO) + amount
         return result

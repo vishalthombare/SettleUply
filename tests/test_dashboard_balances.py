@@ -52,8 +52,8 @@ async def test_net_balance_keeps_positive_negative_and_zero_currencies(db, recei
     dashboard = await DashboardService(db).load(1)
 
     assert dashboard['net_balances'] == {'INR': Decimal(expected)}
-    assert dashboard['receivables'] == {'INR': Decimal(receivable)}
-    assert dashboard['payables'] == {'INR': Decimal(payable)}
+    assert dashboard['receivables'] == {'INR': max(Decimal(expected), Decimal('0'))}
+    assert dashboard['payables'] == {'INR': max(-Decimal(expected), Decimal('0'))}
     # Other consumers of the common totals service retain the existing contract.
     assert await BalanceCalculationService(db).totals(1) == {
         'receivables': dashboard['receivables'],
@@ -77,8 +77,8 @@ async def test_repayments_update_net_using_only_remaining_balances(db):
 
     dashboard = await DashboardService(db).load(1)
 
-    assert dashboard['receivables'] == {'INR': Decimal('15000')}
-    assert dashboard['payables'] == {'INR': Decimal('18000')}
+    assert dashboard['receivables'] == {'INR': Decimal('0')}
+    assert dashboard['payables'] == {'INR': Decimal('3000')}
     assert dashboard['net_balances'] == {'INR': Decimal('-3000')}
 
     await repay(db, lent, '15000')
@@ -120,8 +120,8 @@ async def test_net_excludes_expenses_cancelled_deleted_and_other_users(db):
     dashboard = await DashboardService(db).load(1)
 
     assert dashboard['net_balances'] == {'INR': Decimal('10000')}
-    assert dashboard['receivables'] == {'INR': Decimal('30000')}
-    assert dashboard['payables'] == {'INR': Decimal('20000')}
+    assert dashboard['receivables'] == {'INR': Decimal('10000')}
+    assert dashboard['payables'] == {'INR': Decimal('0')}
 
 
 async def test_group_balances_do_not_enter_personal_dashboard_net(db):

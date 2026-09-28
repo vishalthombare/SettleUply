@@ -12,17 +12,19 @@ class ContactService(Repository):
         balance = BalanceCalculationService(self.db)
         rows = balance.outstanding_query(user_id).subquery()
         owed = select(rows.c.contact_id).where(rows.c.outstanding > 0)
+        net = balance.person_balances_query(user_id).subquery()
+        people = select(net.c.contact_id)
         query = select(Contact).where(Contact.user_id == user_id)
         if active is not None:
             query = query.where(Contact.is_active == active)
         if search:
             query = query.where(Contact.name.ilike(f'%{search}%'))
         if balance_filter == 'owes_me':
-            query = query.where(Contact.id.in_(owed.where(rows.c.transaction_type == TT.MONEY_LENT)))
+            query = query.where(Contact.id.in_(people.where(net.c.net > 0)))
         elif balance_filter == 'i_owe':
-            query = query.where(Contact.id.in_(owed.where(rows.c.transaction_type == TT.MONEY_BORROWED)))
+            query = query.where(Contact.id.in_(people.where(net.c.net < 0)))
         elif balance_filter == 'settled':
-            query = query.where(~Contact.id.in_(owed.where(rows.c.contact_id.is_not(None))))
+            query = query.where(~Contact.id.in_(people.where(net.c.net != 0)))
         elif balance_filter == 'overdue':
             query = query.where(Contact.id.in_(owed.where(rows.c.due_date < await balance.today(user_id))))
         elif balance_filter:

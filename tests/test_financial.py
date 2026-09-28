@@ -33,7 +33,7 @@ async def test_ledger_scenarios_and_ownership(db):
     await SettlementService(db).create(1, borrowed['id'], repayment('200', 'MYR'))
     await TransactionService(db).save(1, transaction('PERSONAL_EXPENSE', '50', 'MYR', None))
     totals = await BalanceCalculationService(db).totals(1, 1)
-    assert totals == {'receivables': {'INR': Decimal('7000')}, 'payables': {'MYR': Decimal('300')}}
+    assert totals == {'receivables': {'INR': Decimal('7000'), 'MYR': Decimal('0')}, 'payables': {'INR': Decimal('0'), 'MYR': Decimal('300')}}
     with pytest.raises(AppError) as error:
         await TransactionService(db).details(2, tx['id'])
     assert error.value.status == 404
